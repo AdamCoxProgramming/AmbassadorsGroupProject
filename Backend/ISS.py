@@ -1,13 +1,79 @@
 from enum import Enum
+from .Accounts import UserAccounts
+from .DataStore import AccessLayer
+from .DataStore.AccessLayer import Location
+from .Resources import Resources
 from .Schedular import Schedular
-from .InterfaceClasses import ShuttleState
+from .InterfaceClasses import ShuttleState, ShuttleType
 
-class Location(Enum):
-    EARTH =0,
-    FLYING =1,
-    SPACE_STATION =2
+class Astronaut:
+    """Represents an Astronaut user
+    pre-condition: the email passed in the constructor must exist"""
+    def __init__(self,userAccount):
+        self.account = userAccount
+        self.id = userAccount.id
+
+    def getLocation(self):
+        """Returns the users location
+        pre-condition: None
+        post-condition: Returns the users location"""
+        return AccessLayer.getAstronautLocation(self.account.email)
+
+    def setLocation(self,location):
+        """sets the users location
+        pre-condition: The location must be valid
+        post-condition: Sets the users location"""
+        AccessLayer.setAstronautLocation(location,self.account.email)
+
+class Astronauts:
+    """A factory for fetching astronauts"""
+    @staticmethod
+    def getAstronauts():
+        """gets all the astronauts
+        pre-condition:None
+        post-condition:A list of astronauts is returned"""
+        users = UserAccounts().getUserAccountsByType(AccessLayer.ASTRONAUT)
+        astronauts = []
+        for user in users:
+            astronauts.append(Astronaut(user))
+        return astronauts
+
+    @staticmethod
+    def getAstronautsAtLocation(location):
+        """gets all the astronauts at a certain location
+        pre-condition:the location must be valid
+        post-condition:A list of astronauts at the specified location is returned in a list"""
+        selected = []
+        astronauts = Astronauts.getAstronauts()
+        for astronaut in astronauts:
+            astroLocation = astronaut.getLocation()
+            locationString = str(location).split('.')[1]
+            if locationString == astroLocation:
+                selected.append(astronaut)
+        return selected
+
+    @staticmethod
+    def getAstronautByEmail(email):
+        """gets a specific astronaut by email
+        pre-condition:None
+        post-condition:If the Astronaut exists they are returned, other wise None is"""
+        user = UserAccounts().getUserAccountByEmail(email)
+        if user == None or user.accountType != str(AccessLayer.ASTRONAUT):
+            return None
+        return Astronaut(user)
+
+    @staticmethod
+    def getAstronautById(id):
+        """gets a specific astronaut by id
+        pre-condition:None
+        post-condition:If the Astronaut exists they are returned, other wise None is"""
+        user = UserAccounts().getUserAccountById(id)
+        if user == None or user.accountType != str(AccessLayer.ASTRONAUT):
+            return None
+        return Astronaut(user)
 
 class Shuttle:
+    """Represents a shuttle in the system"""
     def __init__(self):
         self.flying = False
         self.percentage = 0
@@ -16,49 +82,80 @@ class Shuttle:
         self.items = []
         self.passengers = []
 
-    def addOrderedItem(self,orderedItem):
-        self.items.append(orderedItem)
-
     def addPassenger(self,astronaut):
+        """Adds a passenger to the shuttle
+        pre-condition:The passenger must be a valid astronaut account
+        post-condition:The astronaut is 'stored' on the shuttle"""
         self.passengers.append(astronaut)
 
+    def getPassengers(self):
+        """Returns the astronauts on the shuttle
+        pre-condition:None
+        post-condition:A list of passengers on the shuttle is returned"""
+        return self.passengers
+
+    def clearPassengers(self):
+        """The list of passengers on boared is cleared"""
+        self.passengers = []
+
+    def addOrderedItem(self,orderedItem):
+        """Adds an item to the stock inventory
+        pre-condition:None
+        post-condition:A list of passengers on the shuttle is returned"""
+        self.items.append(orderedItem)
+
     def launchToEarth(self):
+        """Launches the shuttle to earth
+        pre-condition:None
+        post-condition:The shuttle begins its flight to earth"""
         self.flying = True
         self.destination = None
         self.percentage = 0
         self.location = Location.FLYING
 
     def launch(self,dockNo):
+        """Launches the shuttle to the ISS
+        pre-condition: Specify an un-occupied dock
+        post-condition:The shuttle begins its flight to earth"""
         self.flying = True
         self.percentage = 0
         self.destination = dockNo
         self.location = Location.FLYING
 
     def fly(self):
+        """Increments the shuttles current journey
+        pre-condition: None
+        post-condition: The shuttles journey progress increases"""
         self.percentage += 5
 
     def stopFlying(self):
+        """End the current journey
+        pre-condition: None
+        post-condition: The shuttles will remain at its current location"""
         self.flying = False
         self.percentage = 0
 
 class DockState(Enum):
+    """Represents the potential states of a dock"""
     OCCUPIED = 0,
     ALLOCATED = 1,
     FREE = 2
 
 class Dock:
+    """Represents a dock"""
     def __init__(self):
         self.state = DockState.FREE
 
 class GasCanister:
-    def __init__(self):
-        self.amount = 0
+    """Represents a gas canister"""
+    def getAmount(self):
+        return Resources.getItemStockQuantity(OxygenResourceNumber)
 
     def addAmount(self,amount):
-        self.amount += amount
+        Resources.consumeItemStock(OxygenResourceNumber,-amount)
 
     def removeAmount(self,amount):
-        self.amount -= amount
+        Resources.consumeItemStock(OxygenResourceNumber,amount)
 
 class AirSimulation:
     def __init__(self):
@@ -75,15 +172,15 @@ class AirSimulation:
     def addO2(self,amount):
         self.o2InAir += amount
 
+OxygenResourceNumber = 4
+
 class SpaceStation:
     def __init__(self):
         self.docks = [Dock(), Dock(), Dock(), Dock(), Dock(), Dock()]
         self.oxogenCanister = GasCanister()
-        self.oxogenCanister.addAmount(2000)
         self.carbonDioxideCanister = GasCanister
         self.air = AirSimulation()
-        self.updateStation()
-        Schedular.addToSchedule(self.updateStation, 1)
+        self.astronauts = []
 
     def updateStation(self):
         self.update()
@@ -93,49 +190,39 @@ class SpaceStation:
         #print(str(self.oxogenCanister.amount))
         if o2InAir < 7000:
             self.releaseO2()
+        self.orderNecassaryResources()
 
-        o2Left = self.oxogenCanister.amount
-        if o2Left < 1000:
-            if not self.hasOxogenBeenOrdered():
-                self.orderO2CanisterGas()
+    def orderNecassaryResources(self):
+        allResources = Resources.getAllStockedItems()
+        for resource in allResources:
+            if not IssOrders.hasResourceBeenOrdered(resource.itemNumber):
+                if resource.quantityInStock < resource.minimumQuantity:
+                    IssOrders.addOrder(Order(resource.itemNumber,  resource.minimumQuantity))
 
     def shuttleArived(self,shuttle):
         shuttle.location = Location.SPACE_STATION
         self.loadInventory(shuttle)
-        self.docks[shuttle.destination].state = DockState.FREE
-        shuttle.launchToEarth()
+        shuttle.items = []
 
+        for astronaut in shuttle.passengers:
+            astronaut.setLocation(Location.SPACE_STATION)
+            self.astronauts.append(astronaut)
+        shuttle.passengers = []
 
     def loadInventory(self,shuttle):
         for orderedItem in shuttle.items:
             orderedItem.state = OrderState.ARRIVED
-            if orderedItem.resourceType == ResourceType.OXYGEN:
-                gasCanister = GasCanister()
-                gasCanister.addAmount(2000)
-                self.add02CanisterGas(gasCanister)
-        shuttle.items = []
-
-    def hasOxogenBeenOrdered(self):
-        orders = IssOrders.getOrders()
-        for order in orders:
-            if order.resourceType == ResourceType.OXYGEN and order.state != OrderState.ARRIVED:
-                return True
-        return False
+            Resources.consumeItemStock(orderedItem.itemNumber,-orderedItem.quantity)
 
     def releaseO2(self):
-        if self.oxogenCanister.amount < 0:
-            raise Exception("Run out of oxygen")
-        self.oxogenCanister.amount -= 80
-        self.air.addO2(80)
-
-    def add02CanisterGas(self,o2):
-        self.oxogenCanister.addAmount(o2.amount)
+        if self.oxogenCanister.getAmount() < 0:
+            print("Run out of oxygen")
+        amountToConsume = 20
+        self.oxogenCanister.removeAmount(amountToConsume)
+        self.air.addO2(amountToConsume)
 
     def orderO2CanisterGas(self):
-        IssOrders.addOrder(Order(ResourceType.OXYGEN))
-
-class ResourceType(Enum):
-    OXYGEN = 0
+        IssOrders.addOrder(Order(OxygenResourceNumber,1000))
 
 class OrderState(Enum):
     WAITING = 0,
@@ -143,8 +230,9 @@ class OrderState(Enum):
     ARRIVED = 2
 
 class Order:
-    def __init__(self,resourceType):
-        self.resourceType = resourceType
+    def __init__(self,itemNumber,quantity):
+        self.itemNumber = itemNumber
+        self.quantity = quantity
         self.state = OrderState.WAITING
 
     def setShipped(self):
@@ -181,24 +269,33 @@ class IssOrders:
                 pendingOrders.append(order)
         return pendingOrders
 
-class Astronaut:
-    def __init__(self,id):
-        self.id = id
-
-    def getLocation(self):
-        pass
+    @staticmethod
+    def hasResourceBeenOrdered(itemNumber):
+        for order in IssOrders.getOrders():
+            if order.itemNumber == itemNumber and order.state != OrderState.ARRIVED:
+                return True
+        return False
 
 shuttles = [Shuttle(),Shuttle(),Shuttle()]
+unMannedShuttles = [Shuttle(),Shuttle()]
 spaceStation = SpaceStation()
 
 def update():
     moveFlyingShuttles()
     shipPendingOrders()
+    returnUnmannedShuttles()
+    spaceStation.update()
+
+def returnUnmannedShuttles():
+    for shuttle in unMannedShuttles:
+        if shuttle.location == Location.SPACE_STATION:
+            spaceStation.docks[shuttle.destination].state = DockState.FREE
+            shuttle.launchToEarth()
 
 def shipPendingOrders():
         pendingOrders = IssOrders.getPendingOrders()
         if len(pendingOrders) != 0:
-            shuttle = getNextAvailiableShuttle()
+            shuttle = getNextAvailiableUnmannedShuttle()
             if shuttle != None:
                 dockNo = getNextAvailbleDockNo()
                 if dockNo != None:
@@ -216,6 +313,11 @@ def getNextAvailbleDockNo():
         dockNo += 1
     return None
 
+def getNextAvailiableUnmannedShuttle():
+    for shuttle in unMannedShuttles:
+        if shuttle.location == Location.EARTH:
+            return shuttle
+
 def getNextAvailiableShuttle():
     for shuttle in shuttles:
         if shuttle.location == Location.EARTH:
@@ -223,7 +325,8 @@ def getNextAvailiableShuttle():
 
 def moveFlyingShuttles():
     shuttleNo = 1
-    for shuttle in shuttles:
+    allShuttles = shuttles + unMannedShuttles
+    for shuttle in allShuttles:
         if shuttle.flying:
             shuttle.fly()
             if shuttle.percentage >= 100:
@@ -233,14 +336,26 @@ def moveFlyingShuttles():
                     spaceStation.docks[dockNo].state = DockState.OCCUPIED
                     spaceStation.shuttleArived(shuttle)
                 else:
-                    shuttle.location = Location.EARTH
-
+                    shuttleArrivedAtEarth(shuttle)
         shuttleNo += 1
 
+def shuttleArrivedAtEarth(shuttle):
+    shuttle.location = Location.EARTH
+    shuttle.items = []
+    for astronaut in shuttle.passengers:
+        astronaut.setLocation(Location.EARTH)
+    shuttle.clearPassengers()
+
 def getIssOxogenLevel():
-    return spaceStation.oxogenCanister.amount
+    return spaceStation.oxogenCanister.getAmount()
+
+def getIssAstronautsOnBoard():
+    return Astronauts.getAstronautsAtLocation(Location.SPACE_STATION)
 
 def getStatesOfShuttles():
+    return addTypeOfShuttle(shuttles,ShuttleType.MANNED) + addTypeOfShuttle(unMannedShuttles,ShuttleType.UN_MANNED)
+
+def addTypeOfShuttle(shuttles,type):
     shuttleStates = []
     shuttleNo = 1
     for shuttle in shuttles:
@@ -252,25 +367,58 @@ def getStatesOfShuttles():
             destination += 'Earth'
         else:
             destination += 'ISS dock number ' + str(shuttle.destination)
-
-        nextState = ShuttleState(shuttleNo,shuttle.flying,destination,shuttle.percentage)
+        nextState = ShuttleState(shuttleNo,shuttle.flying,destination,shuttle.percentage,shuttle.location,type)
         shuttleStates.append(nextState)
         shuttleNo += 1
 
     return shuttleStates
 
+
 def doesShuttleCarryOxogen(shuttle):
     for item in shuttle.items:
-        if item.resourceType == ResourceType.OXYGEN and item.state != OrderState.ARRIVED:
+        if item.itemNumber == OxygenResourceNumber and item.state != OrderState.ARRIVED:
             return True
     return False
 
 Schedular.addToSchedule(update, 1)
 
-def launchAShuttleFromEarth():
-    shuttle = getNextAvailiableShuttle()
-    if shuttle != None:
-        dockNo = getNextAvailbleDockNo()
-        if dockNo != None:
-            shuttle.launch(dockNo)
-            spaceStation.docks[dockNo].state = DockState.ALLOCATED
+def getAstronauts():
+    return Astronauts.getAstronauts()
+
+def launchShuttleToAppropriateDestination(shuttleNo,astronautIds):
+    if shuttles[shuttleNo].location == Location.EARTH:
+        launchShuttleFromEarth(shuttleNo,astronautIds)
+    else:
+        launchShuttleFromIss(shuttleNo, astronautIds)
+
+def launchShuttleFromEarth(shuttleNo,astronautIds):
+    shuttle = shuttles[shuttleNo]
+    prepareShuttleForFlight(shuttle,astronautIds)
+
+    dockNo = getNextAvailbleDockNo()
+    shuttle.launch(dockNo)
+    spaceStation.docks[dockNo].state = DockState.ALLOCATED
+
+def launchShuttleFromIss(shuttleNo, astronautIds):
+    shuttle = shuttles[shuttleNo]
+    prepareShuttleForFlight(shuttle,astronautIds)
+
+    spaceStation.docks[shuttle.destination].state = DockState.FREE
+    shuttle.launchToEarth()
+
+def prepareShuttleForFlight(shuttle,astronautIds):
+    astronauts = []
+    for astronautId in astronautIds:
+        astronaut = Astronauts.getAstronautById(astronautId)
+        if astronaut != None:
+            astronauts.append(astronaut)
+
+    for astronaut in astronauts:
+        shuttle.addPassenger(astronaut)
+        astronaut.setLocation(Location.FLYING)
+
+def isShuttleOnEarth(shuttleNumber):
+    try:
+        return shuttles[shuttleNumber].location == Location.EARTH
+    except:
+        return False
